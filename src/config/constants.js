@@ -47,6 +47,15 @@ module.exports = {
     MESSAGE: 'Too many requests from this IP. Please try again later.',
   },
 
+    // --- Payment Configuration ---
+  PAYMENT_LIMITS: {
+    MIN_TRANSACTION_AMOUNT: 0.50,
+    MAX_TRANSACTION_AMOUNT: 25000.00,
+    MAX_REFUND_DAYS: 30,
+    SUPPORTED_CURRENCIES: ['USD', 'EUR', 'GBP', 'CAD'],
+  },
+
   // --- Cache ---
   CACHE_TTL_SECONDS: 60,
 };
+
