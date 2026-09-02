@@ -21,6 +21,7 @@ module.exports = {
     MIN_ORDER_AMOUNT: 1.00,
     INCLUDE_TAX_IN_MINIMUM: false,
     MAX_ORDER_AMOUNT: 50000.00,
+    MIN_DISCOUNT_ELIGIBLE_AMOUNT: 25.00,
     CANCELLATION_WINDOW_HOURS: 24,
   },
 
@@ -56,6 +57,18 @@ module.exports = {
     },
     TAX_EXEMPT_CATEGORIES: ['food-beverage'],
   },
+
+  // --- Discount Codes ---
+  DISCOUNT_CONFIG: {
+    MAX_DISCOUNT_PERCENTAGE: 75,
+    MIN_ORDER_FOR_DISCOUNT: 25.00,
+    CODES: {
+      WELCOME10: { type: 'percentage', value: 10, description: 'Welcome offer - 10% off' },
+      SAVE20: { type: 'percentage', value: 20, description: 'Loyalty reward - 20% off' },
+      FREESHIP: { type: 'fixed', value: 9.99, description: 'Free shipping coupon' },
+      VIP50: { type: 'percentage', value: 50, description: 'VIP member discount - 50% off' },
+    },
+  },
   // --- Rate Limiting ---
   RATE_LIMIT: {
     WINDOW_MS: 15 * 60 * 1000,  // 15 minutes
@@ -66,4 +79,5 @@ module.exports = {
   // --- Cache ---
   CACHE_TTL_SECONDS: 60,
 };
+
 
