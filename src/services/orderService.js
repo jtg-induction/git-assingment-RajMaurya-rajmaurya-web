@@ -1,7 +1,7 @@
 const Order = require('../models/order');
 const Product = require('../models/product');
 const User = require('../models/user');
-const { ORDER_STATUS, ORDER_LIMITS, TAX_CONFIG } = require('../config/constants');
+const { ORDER_STATUS, ORDER_LIMITS, TAX_CONFIG, DISCOUNT_CONFIG } = require('../config/constants');
 
 /**
  * Calculate the subtotal for a list of order items.
@@ -36,9 +36,50 @@ const getTaxRateForState = (state) => {
  * @param {number} taxRate - tax percentage (default: 0)
  * @returns {number} total amount due
  */
-const calculateTotal = (subtotal, taxRate = 0) => {
+const calculateTotal = (subtotal, taxRate = 0, discountAmount = 0) => {
   const taxAmount = calculateTax(subtotal, taxRate);
-  return parseFloat((subtotal + taxAmount).toFixed(2));
+  const discounted = subtotal - discountAmount;
+  return parseFloat((discounted + taxAmount).toFixed(2));};
+ /* Calculate the grand total, applying a discount to the subtotal.
+ * @param {number} subtotal
+ * @param {number} discountAmount - flat amount to subtract (default: 0)
+ * @returns {number} total amount due (never goes below 0)
+ */
+
+
+/*
+ * Look up and apply a discount code to a subtotal.
+ * Returns the discount amount and a description.
+ * @param {number} subtotal
+ * @param {string} discountCode
+ * @returns {{ discountAmount: number, discountDescription: string, valid: boolean }}
+ */
+const applyDiscount = (subtotal, discountCode) => {
+  if (!discountCode) {
+    return { discountAmount: 0, discountDescription: null, valid: false };
+  }
+
+  const code = DISCOUNT_CONFIG.CODES[discountCode.toUpperCase()];
+  if (!code) {
+    return { discountAmount: 0, discountDescription: null, valid: false };
+  }
+
+  if (subtotal < DISCOUNT_CONFIG.MIN_ORDER_FOR_DISCOUNT) {
+    const err = new Error(`Discount codes require a minimum order of $${DISCOUNT_CONFIG.MIN_ORDER_FOR_DISCOUNT}.`);
+    err.statusCode = 400;
+    throw err;
+  }
+
+  let discountAmount = 0;
+  if (code.type === 'percentage') {
+    discountAmount = parseFloat((subtotal * (code.value / 100)).toFixed(2));
+    const maxDiscount = subtotal * (DISCOUNT_CONFIG.MAX_DISCOUNT_PERCENTAGE / 100);
+    discountAmount = Math.min(discountAmount, maxDiscount);
+  } else if (code.type === 'fixed') {
+    discountAmount = Math.min(code.value, subtotal);
+  }
+
+  return { discountAmount, discountDescription: code.description, valid: true };
 };
 
 /**
@@ -76,9 +117,10 @@ const validateAndEnrichItems = async (items) => {
 
 /**
  * Create a new order, calculating applicable tax based on shipping state.
+ * Create a new order, applying an optional discount code.
  */
 const createOrder = async (userId, orderData) => {
-  const { items, shippingAddress, notes } = orderData;
+  const { items, shippingAddress, notes, discountCode } = orderData;
 
   const enrichedItems = await validateAndEnrichItems(items);
   const subtotal = calculateSubtotal(enrichedItems);
@@ -89,7 +131,9 @@ const createOrder = async (userId, orderData) => {
   // Calculate tax based on shipping state
   const taxRate = getTaxRateForState(shippingAddress?.state);
   const taxAmount = calculateTax(subtotal, taxRate);
-  const totalAmount = calculateTotal(subtotal, taxRate);
+  // Apply discount code if provided
+  const { discountAmount, discountDescription, valid } = applyDiscount(subtotal, discountCode);
+  const totalAmount = calculateTotal(subtotal, taxRate, discountAmount);
 
   const order = new Order({
     user: userId,
@@ -98,6 +142,9 @@ const createOrder = async (userId, orderData) => {
     subtotal,
     taxRate,
     taxAmount,
+    discountCode: valid ? discountCode.toUpperCase() : undefined,
+    discountAmount,
+    discountDescription,
     totalAmount,
     notes,
     statusHistory: [{ status: ORDER_STATUS.PENDING }],
@@ -155,6 +202,7 @@ const cancelOrder = async (orderId, userId) => {
 
 module.exports = {
   calculateSubtotal, calculateTotal, calculateTax, getTaxRateForState,
+  calculateSubtotal, calculateTotal, applyDiscount,
   validateAndEnrichItems, createOrder, getOrdersByUser,
   getOrderById, updateOrderStatus, cancelOrder,
 };
