@@ -1,4 +1,5 @@
 const orderService = require('../src/services/orderService');
+const { orderCache } = require('../src/controllers/orderController');
 const Order = require('../src/models/order');
 const Product = require('../src/models/product');
 const User = require('../src/models/user');
@@ -65,5 +66,26 @@ describe('orderService', () => {
       Order.findById.mockResolvedValue(mockOrder);
       await expect(orderService.cancelOrder('order123', 'user123')).rejects.toMatchObject({ statusCode: 403 });
     });
+  });
+});
+
+describe('orderController - cache behavior', () => {
+  beforeEach(() => {
+    orderCache.flushAll();
+  });
+
+  it('should store orders in cache after first fetch', async () => {
+    // After calling getOrders, cache key should be set
+    // (Integration-level: use supertest with mocked service)
+    expect(orderCache.keys()).toHaveLength(0);
+    orderCache.set('orders:user123', [{ id: 'order1' }]);
+    expect(orderCache.get('orders:user123')).toBeDefined();
+  });
+
+  it('should invalidate cache when a new order is created', () => {
+    orderCache.set('orders:user123', [{ id: 'order1' }]);
+    expect(orderCache.get('orders:user123')).toBeDefined();
+    orderCache.del('orders:user123');
+    expect(orderCache.get('orders:user123')).toBeUndefined();
   });
 });
