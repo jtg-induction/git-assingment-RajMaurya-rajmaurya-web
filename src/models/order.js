@@ -67,6 +67,18 @@ const orderSchema = new mongoose.Schema({
     min: [0, 'Tax amount cannot be negative'],
   },
   taxExempt: { type: Boolean, default: false },
+  // --- Discount fields (added by feature/rebase-me) ---
+  discountCode: {
+    type: String,
+    uppercase: true,
+    trim: true,
+  },
+  discountAmount: {
+    type: Number,
+    default: 0,
+    min: [0, 'Discount amount cannot be negative'],
+  },
+  discountDescription: { type: String },
 
   shippingCost: { type: Number, default: 0, min: 0 },
   totalAmount: { type: Number, required: true, min: 0 },
@@ -95,5 +107,6 @@ orderSchema.pre('save', function (next) {
 
 orderSchema.index({ user: 1, status: 1, createdAt: -1 });
 orderSchema.index({ orderNumber: 1 });
+orderSchema.index({ discountCode: 1 });
 
 module.exports = mongoose.model('Order', orderSchema);
