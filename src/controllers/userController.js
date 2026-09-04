@@ -6,9 +6,12 @@ const userService = require('../services/userService');
  */
 const register = async (req, res, next) => {
   try {
+    
     const user = await userService.registerUser(req.body);
+    
     res.status(201).json({ success: true, message: 'Account created successfully.', data: user });
   } catch (err) {
+    
     next(err);
   }
 };
@@ -19,11 +22,13 @@ const register = async (req, res, next) => {
  */
 const login = async (req, res, next) => {
   try {
+    
     const { email, password } = req.body;
     if (!email || !password) {
       return res.status(400).json({ success: false, message: 'Email and password are required.' });
     }
     const result = await userService.loginUser(email, password);
+   
     res.json({ success: true, message: 'Login successful.', data: result });
   } catch (err) {
     next(err);
