@@ -1,7 +1,7 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const router = express.Router();
-const { createOrder, getOrders, getOrderById, updateOrderStatus, cancelOrder } = require('../controllers/orderController');
+const { createOrder, getOrders, searchOrders,getOrderById, updateOrderStatus, cancelOrder } = require('../controllers/orderController');
 const { RATE_LIMIT } = require('../config/constants');
 
 // Apply stricter rate limiting to order creation to prevent abuse
@@ -23,6 +23,7 @@ const readLimiter = rateLimit({
 });
 
 router.post('/', createOrderLimiter, createOrder);
+router.get('/search', searchOrders);
 router.get('/', readLimiter, getOrders);
 router.get('/:id', readLimiter, getOrderById);
 router.put('/:id/status', readLimiter, updateOrderStatus);

@@ -4,6 +4,7 @@ const { CACHE_TTL_SECONDS } = require('../config/constants');
 
 // In-memory cache for order list responses
 const orderCache = new NodeCache({ stdTTL: CACHE_TTL_SECONDS, checkperiod: 30 });
+const { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } = require('../config/constants');
 
 /**
  * POST /api/orders
@@ -22,7 +23,8 @@ const createOrder = async (req, res, next) => {
 
 /**
  * GET /api/orders
- * Get all orders for the authenticated user. Cached for CACHE_TTL_SECONDS.
+ * Get paginated and filtered orders for the authenticated user. Cached for CACHE_TTL_SECONDS.
+ * Query params: ?page=1&limit=20&status=pending&sort=-createdAt
  */
 const getOrders = async (req, res, next) => {
   try {
@@ -37,6 +39,69 @@ const getOrders = async (req, res, next) => {
     orderCache.set(cacheKey, orders);
 
     res.json({ success: true, fromCache: false, count: orders.length, data: orders });
+    const {
+      page = 1,
+      limit = DEFAULT_PAGE_SIZE,
+      status,
+      sort = '-createdAt',
+      minAmount,
+      maxAmount,
+    } = req.query;
+
+    const options = {
+      page: Math.max(1, parseInt(page)),
+      limit: Math.min(parseInt(limit), MAX_PAGE_SIZE),
+      status,
+      sort,
+      minAmount: minAmount ? parseFloat(minAmount) : undefined,
+      maxAmount: maxAmount ? parseFloat(maxAmount) : undefined,
+    };
+
+    const result = await orderService.getOrdersByUser(req.user.id, options);
+
+    res.json({
+      success: true,
+      data: result.orders,
+      pagination: {
+        total: result.total,
+        page: options.page,
+        limit: options.limit,
+        pages: Math.ceil(result.total / options.limit),
+        hasNextPage: options.page < Math.ceil(result.total / options.limit),
+        hasPrevPage: options.page > 1,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * GET /api/orders/search?q=widget&status=pending
+ * Full-text search across the user's orders.
+ */
+const searchOrders = async (req, res, next) => {
+  try {
+    const { q, status, page = 1, limit = DEFAULT_PAGE_SIZE } = req.query;
+
+    if (!q || q.trim().length < 2) {
+      return res.status(400).json({ success: false, message: 'Search query must be at least 2 characters.' });
+    }
+
+    const options = {
+      query: q.trim(),
+      status,
+      page: Math.max(1, parseInt(page)),
+      limit: Math.min(parseInt(limit), MAX_PAGE_SIZE),
+    };
+
+    const result = await orderService.searchOrders(req.user.id, options);
+
+    res.json({
+      success: true,
+      data: result.orders,
+      meta: { query: q, total: result.total, page: options.page, limit: options.limit },
+    });
   } catch (err) {
     next(err);
   }
@@ -86,4 +151,4 @@ const cancelOrder = async (req, res, next) => {
   }
 };
 
-module.exports = { createOrder, getOrders, getOrderById, updateOrderStatus, cancelOrder, orderCache };
+module.exports = { createOrder, getOrders, searchOrders, getOrderById, updateOrderStatus, cancelOrder, orderCache };

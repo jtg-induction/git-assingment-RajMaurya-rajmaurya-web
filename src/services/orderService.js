@@ -3,119 +3,97 @@ const Product = require('../models/product');
 const User = require('../models/user');
 const { ORDER_STATUS, ORDER_LIMITS, TAX_CONFIG } = require('../config/constants');
 
-/**
- * Calculate the subtotal for a list of order items.
- */
 const calculateSubtotal = (items) => {
-  return items.reduce((total, item) => {
-    return total + (item.unitPrice * item.quantity);
-  }, 0);
+  return items.reduce((total, item) => total + (item.unitPrice * item.quantity), 0);
 };
 
-/**
- * Calculate the tax amount for a given subtotal and tax rate.
- * @param {number} subtotal
- * @param {number} taxRate - tax percentage (e.g., 8.5 for 8.5%)
- * @returns {number} tax amount
- */
 const calculateTax = (subtotal, taxRate) => {
   if (!taxRate || taxRate <= 0) return 0;
   return parseFloat((subtotal * (taxRate / 100)).toFixed(2));
 };
 
-/**
- * Get the applicable tax rate for a shipping address state.
- */
 const getTaxRateForState = (state) => {
   return TAX_CONFIG.RATES_BY_STATE[state?.toUpperCase()] ?? TAX_CONFIG.DEFAULT_RATE_PERCENTAGE;
 };
 
-/**
- * Calculate the grand total including tax.
- * @param {number} subtotal
- * @param {number} taxRate - tax percentage (default: 0)
- * @returns {number} total amount due
- */
 const calculateTotal = (subtotal, taxRate = 0) => {
   const taxAmount = calculateTax(subtotal, taxRate);
   return parseFloat((subtotal + taxAmount).toFixed(2));
 };
 
-/**
- * Validate order items against inventory and return enriched item list.
- */
 const validateAndEnrichItems = async (items) => {
-  if (!items || items.length === 0) {
-    const err = new Error('Order must contain at least one item.');
-    err.statusCode = 400;
-    throw err;
-  }
-  if (items.length > ORDER_LIMITS.MAX_ITEMS_PER_ORDER) {
-    const err = new Error(`Cannot exceed ${ORDER_LIMITS.MAX_ITEMS_PER_ORDER} items per order.`);
-    err.statusCode = 400;
-    throw err;
-  }
-
+  if (!items || items.length === 0) { const err = new Error('Order must contain at least one item.'); err.statusCode = 400; throw err; }
+  if (items.length > ORDER_LIMITS.MAX_ITEMS_PER_ORDER) { const err = new Error(`Cannot exceed ${ORDER_LIMITS.MAX_ITEMS_PER_ORDER} items.`); err.statusCode = 400; throw err; }
   const enrichedItems = [];
   for (const item of items) {
     const product = await Product.findById(item.productId);
     if (!product) { const err = new Error(`Product '${item.productId}' not found.`); err.statusCode = 404; throw err; }
     if (!product.isAvailable) { const err = new Error(`'${product.name}' is unavailable.`); err.statusCode = 422; throw err; }
     if (product.stock < item.quantity) { const err = new Error(`Insufficient stock for '${product.name}'.`); err.statusCode = 422; throw err; }
-
-    enrichedItems.push({
-      product: product._id,
-      quantity: item.quantity,
-      unitPrice: product.price,
-      productName: product.name,
-      productSku: product.sku,
-    });
+    enrichedItems.push({ product: product._id, quantity: item.quantity, unitPrice: product.price, productName: product.name, productSku: product.sku });
   }
   return enrichedItems;
 };
 
-/**
- * Create a new order, calculating applicable tax based on shipping state.
- */
 const createOrder = async (userId, orderData) => {
   const { items, shippingAddress, notes } = orderData;
-
   const enrichedItems = await validateAndEnrichItems(items);
   const subtotal = calculateSubtotal(enrichedItems);
-
   if (subtotal < ORDER_LIMITS.MIN_ORDER_AMOUNT) { const err = new Error(`Minimum order is $${ORDER_LIMITS.MIN_ORDER_AMOUNT}.`); err.statusCode = 400; throw err; }
-  if (subtotal > ORDER_LIMITS.MAX_ORDER_AMOUNT) { const err = new Error(`Maximum order is $${ORDER_LIMITS.MAX_ORDER_AMOUNT}.`); err.statusCode = 400; throw err; }
-
-  // Calculate tax based on shipping state
   const taxRate = getTaxRateForState(shippingAddress?.state);
   const taxAmount = calculateTax(subtotal, taxRate);
   const totalAmount = calculateTotal(subtotal, taxRate);
-
-  const order = new Order({
-    user: userId,
-    items: enrichedItems,
-    shippingAddress,
-    subtotal,
-    taxRate,
-    taxAmount,
-    totalAmount,
-    notes,
-    statusHistory: [{ status: ORDER_STATUS.PENDING }],
-  });
-
+  const order = new Order({ user: userId, items: enrichedItems, shippingAddress, subtotal, taxRate, taxAmount, totalAmount, notes, statusHistory: [{ status: ORDER_STATUS.PENDING }] });
   await order.save();
-
-  await Promise.all(enrichedItems.map((item) =>
-    Product.findByIdAndUpdate(item.product, { $inc: { stock: -item.quantity } })
-  ));
-
+  await Promise.all(enrichedItems.map((item) => Product.findByIdAndUpdate(item.product, { $inc: { stock: -item.quantity } })));
   await User.findByIdAndUpdate(userId, { $inc: { totalOrders: 1, totalSpend: totalAmount } });
-
   return order.populate('items.product');
 };
 
-const getOrdersByUser = async (userId) => {
-  return Order.find({ user: userId }).populate('items.product', 'name sku images').sort({ createdAt: -1 });
+/**
+ * Get paginated and filtered orders for a user.
+ * @param {string} userId
+ * @param {Object} options - { page, limit, status, sort, minAmount, maxAmount }
+ */
+const getOrdersByUser = async (userId, options = {}) => {
+  const { page = 1, limit = 20, status, sort = '-createdAt', minAmount, maxAmount } = options;
+
+  const filter = { user: userId };
+  if (status) filter.status = status;
+  if (minAmount !== undefined || maxAmount !== undefined) {
+    filter.totalAmount = {};
+    if (minAmount !== undefined) filter.totalAmount.$gte = minAmount;
+    if (maxAmount !== undefined) filter.totalAmount.$lte = maxAmount;
+  }
+
+  const skip = (page - 1) * limit;
+  const [orders, total] = await Promise.all([
+    Order.find(filter).populate('items.product', 'name sku images').sort(sort).skip(skip).limit(limit),
+    Order.countDocuments(filter),
+  ]);
+
+  return { orders, total };
+};
+
+/**
+ * Full-text search across a user's orders (searches product names in items).
+ */
+const searchOrders = async (userId, options = {}) => {
+  const { query, status, page = 1, limit = 20 } = options;
+
+  const filter = {
+    user: userId,
+    'items.productName': { $regex: query, $options: 'i' },
+  };
+  if (status) filter.status = status;
+
+  const skip = (page - 1) * limit;
+  const [orders, total] = await Promise.all([
+    Order.find(filter).populate('items.product', 'name sku images').sort('-createdAt').skip(skip).limit(limit),
+    Order.countDocuments(filter),
+  ]);
+
+  return { orders, total };
 };
 
 const getOrderById = async (orderId, userId, userRole) => {
@@ -126,11 +104,7 @@ const getOrderById = async (orderId, userId, userRole) => {
 };
 
 const updateOrderStatus = async (orderId, newStatus, adminId, reason) => {
-  const validTransitions = {
-    pending: ['confirmed', 'cancelled'], confirmed: ['processing', 'cancelled'],
-    processing: ['shipped', 'cancelled'], shipped: ['delivered'],
-    delivered: ['refunded'], cancelled: [], refunded: [],
-  };
+  const validTransitions = { pending: ['confirmed', 'cancelled'], confirmed: ['processing', 'cancelled'], processing: ['shipped', 'cancelled'], shipped: ['delivered'], delivered: ['refunded'], cancelled: [], refunded: [] };
   const order = await Order.findById(orderId);
   if (!order) { const err = new Error('Order not found.'); err.statusCode = 404; throw err; }
   if (!validTransitions[order.status].includes(newStatus)) { const err = new Error(`Cannot transition from '${order.status}' to '${newStatus}'.`); err.statusCode = 422; throw err; }
@@ -153,8 +127,4 @@ const cancelOrder = async (orderId, userId) => {
   return order;
 };
 
-module.exports = {
-  calculateSubtotal, calculateTotal, calculateTax, getTaxRateForState,
-  validateAndEnrichItems, createOrder, getOrdersByUser,
-  getOrderById, updateOrderStatus, cancelOrder,
-};
+module.exports = { calculateSubtotal, calculateTotal, calculateTax, getTaxRateForState, validateAndEnrichItems, createOrder, getOrdersByUser, searchOrders, getOrderById, updateOrderStatus, cancelOrder };

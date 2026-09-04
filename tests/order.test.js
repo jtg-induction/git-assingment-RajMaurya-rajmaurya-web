@@ -22,6 +22,38 @@ describe('orderService', () => {
     });
   });
 
+  describe('getOrdersByUser() - pagination', () => {
+    it('should apply skip and limit based on page options', async () => {
+      const mockFind = { populate: jest.fn().mockReturnThis(), sort: jest.fn().mockReturnThis(), skip: jest.fn().mockReturnThis(), limit: jest.fn().mockResolvedValue([]) };
+      Order.find.mockReturnValue(mockFind);
+      Order.countDocuments.mockResolvedValue(50);
+
+      await orderService.getOrdersByUser('user123', { page: 2, limit: 10 });
+
+      expect(mockFind.skip).toHaveBeenCalledWith(10); // (page-1) * limit = 1 * 10
+      expect(mockFind.limit).toHaveBeenCalledWith(10);
+    });
+
+    it('should filter by status when provided', async () => {
+      const mockFind = { populate: jest.fn().mockReturnThis(), sort: jest.fn().mockReturnThis(), skip: jest.fn().mockReturnThis(), limit: jest.fn().mockResolvedValue([]) };
+      Order.find.mockReturnValue(mockFind);
+      Order.countDocuments.mockResolvedValue(0);
+
+      await orderService.getOrdersByUser('user123', { status: 'pending' });
+
+      expect(Order.find).toHaveBeenCalledWith(expect.objectContaining({ status: 'pending' }));
+    });
+
+    it('should return total count alongside orders', async () => {
+      const mockFind = { populate: jest.fn().mockReturnThis(), sort: jest.fn().mockReturnThis(), skip: jest.fn().mockReturnThis(), limit: jest.fn().mockResolvedValue([]) };
+      Order.find.mockReturnValue(mockFind);
+      Order.countDocuments.mockResolvedValue(42);
+
+      const result = await orderService.getOrdersByUser('user123', {});
+      expect(result.total).toBe(42);
+    });
+  });
+
   describe('cancelOrder()', () => {
     it('should throw 422 if order is not in pending state', async () => {
       const mockOrder = { user: { toString: () => 'user123' }, status: 'shipped', items: [] };
